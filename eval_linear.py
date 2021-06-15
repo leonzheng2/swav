@@ -28,7 +28,7 @@ from src.utils import (
     init_distributed_mode,
     accuracy,
 )
-import src.resnet50 as resnet_models
+import src.resnet as resnet_models
 
 logger = getLogger()
 
@@ -45,6 +45,12 @@ parser.add_argument("--data_path", type=str, default="/path/to/imagenet",
                     help="path to dataset repository")
 parser.add_argument("--workers", default=10, type=int,
                     help="number of data loading workers")
+
+#########################
+#### data parameters ####
+#########################
+parser.add_argument("--subset", type=int, default=-1,
+                    help="take a fix number of images per class (example 260). Not used for the moment")
 
 #########################
 #### model parameters ###
@@ -233,7 +239,7 @@ class RegLog(nn.Module):
         super(RegLog, self).__init__()
         self.bn = None
         if global_avg:
-            if arch == "resnet50":
+            if arch == "resnet50" or arch == "resnet18":
                 s = 2048
             elif arch == "resnet50w2":
                 s = 4096

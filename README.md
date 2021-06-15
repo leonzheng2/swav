@@ -75,7 +75,7 @@ We provide the running times for some of our runs:
 
 ## Singlenode training
 SwAV is very simple to implement and experiment with.
-Our implementation consists in a [main_swav.py](./main_swav.py) file from which are imported the dataset definition [src/multicropdataset.py](./src/multicropdataset.py), the model architecture [src/resnet50.py](./src/resnet50.py) and some miscellaneous training utilities [src/utils.py](./src/utils.py).
+Our implementation consists in a [main_swav.py](./main_swav.py) file from which are imported the dataset definition [src/multicropdataset.py](./src/multicropdataset.py), the model architecture [src/resnet50.py](src/resnet.py) and some miscellaneous training utilities [src/utils.py](./src/utils.py).
 
 For example, to train SwAV baseline on a single node with 8 gpus for 400 epochs, run:
 ```

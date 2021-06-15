@@ -15,6 +15,15 @@ import torchvision.transforms as transforms
 logger = getLogger()
 
 
+def build_label_index(labels):
+    label2inds = {}
+    for idx, label in enumerate(labels):
+        if label2inds.get(label) is None:
+            label2inds[label] = []
+        label2inds[label].append(idx)
+    return label2inds
+
+
 class MultiCropDataset(datasets.ImageFolder):
     def __init__(
         self,
@@ -25,8 +34,23 @@ class MultiCropDataset(datasets.ImageFolder):
         max_scale_crops,
         size_dataset=-1,
         return_index=False,
+        subset=-1
     ):
         super(MultiCropDataset, self).__init__(data_path)
+
+        # Subset
+        if subset > 0:
+            all_indices = []
+            label2inds = build_label_index(self.targets)
+            for img_indices in label2inds.values():
+                assert len(img_indices) >= subset
+                all_indices += img_indices[:subset]
+            self.imgs = [self.imgs[idx] for idx in all_indices]
+            self.samples = [self.samples[idx] for idx in all_indices]
+            self.targets = [self.targets[idx] for idx in all_indices]
+            # assert len(self) == (subset * 1000)
+        # print('Size dataset: ', len(self))
+
         assert len(size_crops) == len(nmb_crops)
         assert len(min_scale_crops) == len(nmb_crops)
         assert len(max_scale_crops) == len(nmb_crops)

@@ -19,8 +19,8 @@ import torch.nn.parallel
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
 import torch.optim
-import apex
-from apex.parallel.LARC import LARC
+# import apex
+# from apex.parallel.LARC import LARC
 from scipy.sparse import csr_matrix
 
 from src.utils import (
@@ -32,7 +32,7 @@ from src.utils import (
     init_distributed_mode,
 )
 from src.multicropdataset import MultiCropDataset
-import src.resnet50 as resnet_models
+import src.resnet as resnet_models
 
 logger = getLogger()
 
@@ -43,6 +43,8 @@ parser = argparse.ArgumentParser(description="Implementation of DeepCluster-v2")
 #########################
 parser.add_argument("--data_path", type=str, default="/path/to/imagenet",
                     help="path to dataset repository")
+parser.add_argument("--subset", type=int, default=-1,
+                    help="take a fix number of images per class (example 260)")
 parser.add_argument("--nmb_crops", type=int, default=[2], nargs="+",
                     help="list of number of crops (example: [2, 6])")
 parser.add_argument("--size_crops", type=int, default=[224], nargs="+",
@@ -63,6 +65,8 @@ parser.add_argument("--feat_dim", default=128, type=int,
                     help="feature dimension")
 parser.add_argument("--nmb_prototypes", default=[3000, 3000, 3000], type=int, nargs="+",
                     help="number of prototypes - it can be multihead")
+parser.add_argument("--nmb_kmeans_iters", default=10, type=int,
+                    help="number for K-means iterations. Choose 0 for just random centroids among data.")
 
 #########################
 #### optim parameters ###
@@ -126,6 +130,7 @@ def main():
         args.min_scale_crops,
         args.max_scale_crops,
         return_index=True,
+        subset=args.subset
     )
     sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(
@@ -148,11 +153,11 @@ def main():
     # synchronize batch norm layers
     if args.sync_bn == "pytorch":
         model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    elif args.sync_bn == "apex":
-        # with apex syncbn we sync bn per group because it speeds up computation
-        # compared to global syncbn
-        process_group = apex.parallel.create_syncbn_process_group(args.syncbn_process_group_size)
-        model = apex.parallel.convert_syncbn_model(model, process_group=process_group)
+    # elif args.sync_bn == "apex":
+    #     # with apex syncbn we sync bn per group because it speeds up computation
+    #     # compared to global syncbn
+    #     process_group = apex.parallel.create_syncbn_process_group(args.syncbn_process_group_size)
+    #     model = apex.parallel.convert_syncbn_model(model, process_group=process_group)
     # copy model to GPU
     model = model.cuda()
     if args.rank == 0:
@@ -166,7 +171,7 @@ def main():
         momentum=0.9,
         weight_decay=args.wd,
     )
-    optimizer = LARC(optimizer=optimizer, trust_coefficient=0.001, clip=False)
+    # optimizer = LARC(optimizer=optimizer, trust_coefficient=0.001, clip=False)
     warmup_lr_schedule = np.linspace(args.start_warmup, args.base_lr, len(train_loader) * args.warmup_epochs)
     iters = np.arange(len(train_loader) * (args.epochs - args.warmup_epochs))
     cosine_lr_schedule = np.array([args.final_lr + 0.5 * (args.base_lr - args.final_lr) * (1 + \
@@ -248,7 +253,8 @@ def train(loader, model, optimizer, epoch, schedule, local_memory_index, local_m
     model.train()
     cross_entropy = nn.CrossEntropyLoss(ignore_index=-100)
 
-    assignments = cluster_memory(model, local_memory_index, local_memory_embeddings, len(loader.dataset))
+    assignments = cluster_memory(model, local_memory_index, local_memory_embeddings, len(loader.dataset),
+                                 nmb_kmeans_iters=args.nmb_kmeans_iters)
     logger.info('Clustering for epoch {} done.'.format(epoch))
 
     end = time.time()
@@ -308,7 +314,7 @@ def train(loader, model, optimizer, epoch, schedule, local_memory_index, local_m
                     batch_time=batch_time,
                     data_time=data_time,
                     loss=losses,
-                    lr=optimizer.optim.param_groups[0]["lr"],
+                    lr=optimizer.param_groups[0]["lr"],
                 )
             )
     return (epoch, losses.avg), local_memory_index, local_memory_embeddings
@@ -321,7 +327,9 @@ def init_memory(dataloader, model):
     start_idx = 0
     with torch.no_grad():
         logger.info('Start initializing the memory banks')
-        for index, inputs in dataloader:
+        for i, (index, inputs) in enumerate(dataloader):
+            if i % 100 == 0:
+                logger.info(f"Iteration {i} / {len(dataloader)}")
             nmb_unique_idx = inputs[0].size(0)
             index = index.cuda(non_blocking=True)
 
@@ -338,7 +346,7 @@ def init_memory(dataloader, model):
                     start_idx : start_idx + nmb_unique_idx
                 ] = embeddings
             start_idx += nmb_unique_idx
-    logger.info('Initializion of the memory banks done.')
+    logger.info('Initialization of the memory banks done.')
     return local_memory_index, local_memory_embeddings
 
 

@@ -7,9 +7,9 @@
 import torch
 from torchvision.models.resnet import resnet50 as _resnet50
 
-from src.resnet50 import resnet50w2 as _resnet50w2
-from src.resnet50 import resnet50w4 as _resnet50w4
-from src.resnet50 import resnet50w5 as _resnet50w5
+from src.resnet import resnet50w2 as _resnet50w2
+from src.resnet import resnet50w4 as _resnet50w4
+from src.resnet import resnet50w5 as _resnet50w5
 
 dependencies = ["torch", "torchvision"]
 
