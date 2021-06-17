@@ -223,6 +223,7 @@ def main():
             lr_schedule,
             local_memory_index,
             local_memory_embeddings,
+            args.nmb_kmeans_iter
         )
         training_stats.update(scores)
 
@@ -246,16 +247,17 @@ def main():
                     "local_memory_index": local_memory_index}, mb_path)
 
 
-def train(loader, model, optimizer, epoch, schedule, local_memory_index, local_memory_embeddings):
+def train(loader, model, optimizer, epoch, schedule, local_memory_index, local_memory_embeddings, nmb_kmeans_iter):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
     model.train()
     cross_entropy = nn.CrossEntropyLoss(ignore_index=-100)
 
-    assignments = cluster_memory(model, local_memory_index, local_memory_embeddings, len(loader.dataset),
-                                 nmb_kmeans_iters=args.nmb_kmeans_iters)
-    logger.info('Clustering for epoch {} done.'.format(epoch))
+    since = time.time()
+    assignments = cluster_memory(model, local_memory_index, local_memory_embeddings,
+                                 len(loader.dataset), nmb_kmeans_iter)
+    logger.info('Clustering for epoch {} done in {} sec.'.format(epoch, time.time() - since))
 
     end = time.time()
     start_idx = 0
@@ -350,7 +352,8 @@ def init_memory(dataloader, model):
     return local_memory_index, local_memory_embeddings
 
 
-def cluster_memory(model, local_memory_index, local_memory_embeddings, size_dataset, nmb_kmeans_iters=10):
+def cluster_memory(model, local_memory_index, local_memory_embeddings, size_dataset, nmb_kmeans_iters):
+    logger.info(f"Number of kmeans iterations: {nmb_kmeans_iters}")
     j = 0
     assignments = -100 * torch.ones(len(args.nmb_prototypes), size_dataset).long()
     with torch.no_grad():
