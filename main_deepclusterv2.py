@@ -223,7 +223,7 @@ def main():
             lr_schedule,
             local_memory_index,
             local_memory_embeddings,
-            args.nmb_kmeans_iter
+            args.nmb_kmeans_iters
         )
         training_stats.update(scores)
 
@@ -247,7 +247,7 @@ def main():
                     "local_memory_index": local_memory_index}, mb_path)
 
 
-def train(loader, model, optimizer, epoch, schedule, local_memory_index, local_memory_embeddings, nmb_kmeans_iter):
+def train(loader, model, optimizer, epoch, schedule, local_memory_index, local_memory_embeddings, nmb_kmeans_iters):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -256,7 +256,7 @@ def train(loader, model, optimizer, epoch, schedule, local_memory_index, local_m
 
     since = time.time()
     assignments = cluster_memory(model, local_memory_index, local_memory_embeddings,
-                                 len(loader.dataset), nmb_kmeans_iter)
+                                 len(loader.dataset), nmb_kmeans_iters)
     logger.info('Clustering for epoch {} done in {} sec.'.format(epoch, time.time() - since))
 
     end = time.time()
