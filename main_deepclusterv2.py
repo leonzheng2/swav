@@ -533,26 +533,29 @@ def cluster_memory(model, local_memory_index, local_memory_embeddings, size_data
             indexes_all = torch.cat(indexes_all).cpu()
 
             # log assignments
-            # print("assignments_all", assignments_all.shape)
-            # print("indexes_all", indexes_all.shape)
-            # print("assignments[i_K]", assignments[i_K].shape)
             assignments[i_K][indexes_all] = assignments_all
 
             # Misc
-            features_np = local_memory_embeddings[j].cpu().numpy()
-            centroids_np = centroids.cpu().numpy()
-            comp_learning_metrics = clustering_metrics(features_np, centroids_np)
-            logger.info("Compressive learning metrics: " + str(comp_learning_metrics))
+            results = ResultsData({})
+            features = local_memory_embeddings[j]
+            results.add_result("SSE", sum_of_squarred_errors(features, centroids))
+            results.add_result("SE", sum_of_errors(features, centroids))
+            spherical_k_means_metrics = clustering_metrics(features, centroids)
+            results.update_results(spherical_k_means_metrics)
+            logger.info("Spherical k-means metrics: " + str(results.results))
+            results_dir = Path(args.dump_path) / "results"
+            results_dir.mkdir(exist_ok=True, parents=True)
+            results.save(results_dir / "spherical_k_means_results.csv", "no output")
 
             # Plot clustering
             figures_dir = Path(args.dump_path) / "figures-spherical-kmeans"
             figures_dir.mkdir(exist_ok=True, parents=True)
-            proj_dim = np.random.choice(features_np.shape[1], 2, replace=False)
+            proj_dim = np.random.choice(features.shape[1], 2, replace=False)
             dim_1 = proj_dim[0]
             dim_2 = proj_dim[1]
             current_time = str(datetime.now().strftime("%d-%m-%Y %H-%M-%S"))
-            plot_cluster_assignments_and_histogram(current_time, features_np, centroids_np, figures_dir / current_time,
-                                                   dim_1, dim_2)
+            plot_cluster_assignments_and_histogram(current_time + " " + str(results.exp_id), features, centroids,
+                                                   figures_dir / current_time, dim_1, dim_2)
 
             # next memory bank to use
             j = (j + 1) % len(args.crops_for_assign)
