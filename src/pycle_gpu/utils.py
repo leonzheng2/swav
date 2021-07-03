@@ -3,15 +3,13 @@ Toolbox for miscellaneous methods.
 Leon Zheng
 """
 
-import scipy.spatial
-import scipy.stats
 import numpy as np
 import torch
 
 
 def compute_assignment(dataset, centroids):
-    distances = scipy.spatial.distance.cdist(dataset, centroids, 'euclidean')
-    labels = np.argmin(distances, axis=1)
+    distances = torch.cdist(dataset, centroids)
+    labels = torch.argmin(distances, dim=1)
     return labels
 
 
@@ -22,21 +20,6 @@ def compute_clusters_from_assignment(dataset, centroids):
         clusters[k] = dataset[labels == k]
     return clusters, labels
 
-
-def sum_of_squared_errors(dataset, centroids):
-    """Computes the Sum of Errors of some centroids on a dataset, given by
-        SE(X,C) = sum_{x_i in X} min_{c_k in C} ||x_i-c_k||_2.
-
-    Arguments:
-        - X: (n,d)-numpy array, the dataset of n examples in dimension d
-        - C: (K,d)-numpy array, the K centroids in dimension d
-
-    Returns:
-        - SSE: real, the SSE score defined above
-    """
-    distances = scipy.spatial.distance.cdist(dataset, centroids, 'sqeuclidean')
-
-    return np.min(distances, axis=1).sum()
 
 def sum_of_errors(dataset, centroids):
     """Computes the Sum of Errors of some centroids on a dataset, given by
@@ -49,9 +32,24 @@ def sum_of_errors(dataset, centroids):
     Returns:
         - SSE: real, the SSE score defined above
     """
-    distances = scipy.spatial.distance.cdist(dataset, centroids, 'euclidean')
+    distances = torch.cdist(dataset, centroids)
 
-    return np.min(distances, axis=1).sum()
+    return torch.sum(torch.min(distances, dim=1)[0])
+
+
+def sum_of_squarred_errors(dataset, centroids):
+    """Computes the Sum of Errors of some centroids on a dataset, given by
+        SE(X,C) = sum_{x_i in X} min_{c_k in C} ||x_i-c_k||_2.
+
+    Arguments:
+        - X: (n,d)-numpy array, the dataset of n examples in dimension d
+        - C: (K,d)-numpy array, the K centroids in dimension d
+
+    Returns:
+        - SSE: real, the SSE score defined above
+    """
+    distances = torch.square(torch.cdist(dataset, centroids))
+    return torch.sum(torch.min(distances, dim=1)[0])
 
 
 def cov(m, rowvar=False):
@@ -108,17 +106,15 @@ def clustering_metrics(features, centroids):
                                                      dic['relative_size_mean'] * 0.01))
     dic['number_empty_clusters'] = float(np.sum(size_clusters == 0))
 
-    dic['entropy_size_clusters'] = float(scipy.stats.entropy(size_clusters / len(features)))
-    dic['entropy_uniform_distribution'] = float(scipy.stats.entropy(dic['relative_size_mean']
-                                                                    * np.ones(len(features))))
-    dic['relative_entropy_size_clusters'] = dic['entropy_size_clusters'] / dic['entropy_uniform_distribution']
+    # dic['entropy_size_clusters'] = float(scipy.stats.entropy(size_clusters / len(features)))
+    # dic['entropy_uniform_distribution'] = float(scipy.stats.entropy(dic['relative_size_mean']
+    #                                                                 * np.ones(len(features))))
+    # dic['relative_entropy_size_clusters'] = dic['entropy_size_clusters'] / dic['entropy_uniform_distribution']
 
-    dic['centroids_max_norm'] = float(np.max(np.linalg.norm(centroids, axis=1)))
-    dic['centroids_mean_norm'] = float(np.mean(np.linalg.norm(centroids, axis=1)))
-    dic['centroids_min_norm'] = float(np.min(np.linalg.norm(centroids, axis=1)))
-
-    dic['SSE'] = float(sum_of_squared_errors(features, centroids))
-    dic['SE'] = float(sum_of_errors(features, centroids))
+    norms = torch.norm(centroids, dim=1)
+    dic['centroids_max_norm'] = float(torch.max(norms).item())
+    dic['centroids_mean_norm'] = float(torch.mean(norms).item())
+    dic['centroids_min_norm'] = float(torch.min(norms).item())
 
     # dic['nmi'] = normalized_mutual_info_score(labels, assignment)
 

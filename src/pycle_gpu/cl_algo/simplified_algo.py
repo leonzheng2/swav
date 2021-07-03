@@ -109,7 +109,7 @@ class SimplifiedHierarchicalSolver:
             norm_atom = torch.tensor(self.minimum_atom_norm)
         return -1. / norm_atom * torch.real(torch.vdot(sketch_of_atom, residual))
 
-    def maximize_atom_correlation(self, residual, tol=1e-2, max_iter=1000, tensorboard=False):
+    def maximize_atom_correlation(self, residual, tol=1e-2, max_iter=1000, log_dir=None):
         """
         Step 1 in CLOMP-R algorithm. Find most correlated atom. Torch optimization, using Adam.
         :param residual: sketch residual
@@ -123,8 +123,15 @@ class SimplifiedHierarchicalSolver:
         params = [torch.nn.Parameter(new_theta, requires_grad=True)]
         optimizer = torch.optim.Adam(params, lr=0.01)
 
-        if tensorboard:
-            writer = SummaryWriter()
+        if log_dir:
+            import socket
+            from datetime import datetime
+            current_time = datetime.now().strftime('%b%d_%H-%M-%S')
+            event_name = current_time + '_' + socket.gethostname()
+            comment = "maximize_atom_correlation"
+            event_name = event_name + "_" + comment
+            writer = SummaryWriter(os.path.join(log_dir, event_name))
+
         for i in range(max_iter):
             optimizer.zero_grad()
             loss = self.loss_atom_correlation(params[0], residual)
@@ -137,12 +144,12 @@ class SimplifiedHierarchicalSolver:
                 previous_loss = torch.clone(loss)
             else:
                 relative_loss_diff = torch.abs(previous_loss - loss) / torch.abs(previous_loss)
-                if tensorboard:
+                if log_dir:
                     writer.add_scalar(f'maximize_atom_correlation', loss.item(), i)
                 if relative_loss_diff.item() <= tol:
                     break
                 previous_loss = torch.clone(loss)
-        if tensorboard:
+        if log_dir:
             writer.flush()
             writer.close()
         return new_theta.data.detach()
@@ -200,21 +207,20 @@ class SimplifiedHierarchicalSolver:
 
     def fit_once(self, runs_dir=None):
         n_iterations = int(np.ceil(np.log2(self.nb_mixtures)))  # log_2(K) iterations
-        new_theta = self.maximize_atom_correlation(self.sketch)
+        # new_theta = self.maximize_atom_correlation(self.sketch, log_dir=runs_dir)
+        new_theta = self.randomly_initialize_several_atoms(1).squeeze()
         self.add_several_atoms(torch.unsqueeze(new_theta, 0))
         self.alphas = torch.ones(1, dtype=self.real_dtype).to(self.device)
 
         for i_iter in range(n_iterations):
             if self.verbose:
                 print(f'Iteration {i_iter + 1} / {n_iterations}')
-                print("Splitting all atoms...")
+            print("Splitting all atoms...")
             self.split_all_current_thetas_alphas()
-            if self.verbose:
-                print("Fine-tuning...")
+            print("Fine-tuning...")
             self.minimize_cost_from_current_sol(log_dir=runs_dir, sub_log_dir=f'ITER_{i_iter + 1}')
 
-        if self.verbose:
-            print("Final fine-tuning...")
+        print("Final fine-tuning...")
         self.minimize_cost_from_current_sol(log_dir=runs_dir, sub_log_dir='FINAL_FINE_TUNING')
         self.projection_step(self.all_thetas)
         self.alphas /= torch.sum(self.alphas)
@@ -223,13 +229,13 @@ class SimplifiedHierarchicalSolver:
 class SimplifiedHierarchicalGmm(SimplifiedHierarchicalSolver):
 
     def __init__(self, freq_matrix, nb_mixtures, sketch, sigma2_bar, freq_epochs, freq_batch_size, lr, beta_1, beta_2,
-                 gamma, step_size, verbose):
+                 gamma, step_size, random_atom, std_lower_bound, verbose):
         SimplifiedHierarchicalSolver.__init__(self, freq_matrix, nb_mixtures, 2 * freq_matrix.d, sketch,
                                               freq_epochs, freq_batch_size, lr, beta_1, beta_2, gamma,
                                               step_size, verbose)
 
         # Manage bounds
-        variance_relative_lower_bound = 1e-4 ** 2
+        variance_relative_lower_bound = std_lower_bound ** 2
         variance_relative_upper_bound = 0.5 ** 2
         self.upper_data = torch.ones(self.freq_matrix.d, device=self.device, dtype=self.real_dtype)
         self.lower_data = -1. * torch.ones(self.freq_matrix.d, device=self.device, dtype=self.real_dtype)
@@ -242,6 +248,7 @@ class SimplifiedHierarchicalGmm(SimplifiedHierarchicalSolver):
         self.mean_projector = ProjectorLessUnit2Norm()
 
         # For initialization of Gaussian atoms
+        self.random_atom = random_atom
         self.sigma2_bar = torch.tensor(sigma2_bar, device=self.device)
 
     def randomly_initialize_several_atoms(self, nb_atoms):
@@ -250,7 +257,8 @@ class SimplifiedHierarchicalGmm(SimplifiedHierarchicalSolver):
         :param nb_atoms: int
         :return: torch tensor for new atoms
         """
-        all_new_mu = (self.upper_data - self.lower_data) * torch.rand(nb_atoms, self.freq_matrix.d).to(self.device) + self.lower_data
+        # all_new_mu = (self.upper_data - self.lower_data) * torch.rand(nb_atoms, self.freq_matrix.d).to(self.device) + self.lower_data
+        all_new_mu = self.random_atom.repeat(nb_atoms, 1)
         all_new_sigma = (1.5 - 0.5) * torch.rand(nb_atoms, self.freq_matrix.d, device=self.device) + 0.5
         all_new_sigma *= self.sigma2_bar
         new_theta = torch.cat((all_new_mu, all_new_sigma), dim=1)
@@ -273,9 +281,9 @@ class SimplifiedHierarchicalGmm(SimplifiedHierarchicalSolver):
 
     def split_all_current_thetas_alphas(self):
         all_mus, all_sigmas = self.all_thetas[:, :self.freq_matrix.d], self.all_thetas[:, -self.freq_matrix.d:]
+        print(torch.max(all_sigmas, dim=1)[0])
         all_i_max_var = torch.argmax(all_sigmas, dim=1).to(torch.long)
-        if self.verbose:
-            print(f"Splitting directions: {all_i_max_var}")
+        print(f"Splitting directions: {all_i_max_var}")
         all_direction_max_var = f.one_hot(all_i_max_var, num_classes=self.freq_matrix.d)
         all_max_var = all_sigmas.gather(1, all_i_max_var.view(-1, 1)).squeeze()
         all_max_deviation = torch.sqrt(all_max_var)

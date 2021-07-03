@@ -23,14 +23,17 @@ import torch.optim
 # from apex.parallel.LARC import LARC
 from scipy.sparse import csr_matrix
 
+from src.scikit_leon.manager import ResultsData
 from src.pycle_gpu.sketching.variance_estimation import estimate_sigma_adapted_radius
 from src.pycle_gpu.sketching.frequency_matrix import DenseFrequencyMatrix
-from src.pycle_gpu.cl_algo.simplified_algo import SimplifiedHierarchicalGmm
+from src.pycle_gpu.cl_algo.direct_algo import HierarchicalCompressiveGMM
 from src.pycle_gpu.utils import clustering_metrics
-from src.visualization.visualize_clustering import plot_cluster_assignments_and_histogram
+from src.visualization.visualize_clustering import plot_cluster_assignments_and_histogram, compute_clusters_from_assignment
 from torch.utils.data import DataLoader, TensorDataset
+from src.pycle_gpu.utils import sum_of_squarred_errors, sum_of_errors
 from datetime import datetime
 from pathlib import Path
+import matplotlib.pyplot as plt
 
 from src.utils import (
     bool_flag,
@@ -400,50 +403,65 @@ def compressive_clustering_memory(model, local_memory_index, local_memory_embedd
     j = 0
     assignments = -100 * torch.ones(len(args.nmb_prototypes), size_dataset).long()
     for i_K, K in enumerate(args.nmb_prototypes):
+        results = ResultsData({})
         # run compressive clustering, not distributed
         features = local_memory_embeddings[j]
-        # print(torch.norm(features, dim=1)[:10])
         dim = local_memory_embeddings.shape[-1]
         nb_freq = 2 * K * dim
         freq_mat, sigma2_bar = sampling_frequencies(features, nb_freq)
         sketch = compute_sketch(features, freq_mat)
 
         # TODO Put these parameters in the argument parser
-        solver = SimplifiedHierarchicalGmm(freq_mat, K, sketch, sigma2_bar, freq_epochs=1,
-                                           freq_batch_size=1024, lr=0.0003, beta_1=0, beta_2=0.99,
-                                           gamma=0.98, step_size=1, verbose=True)
+        random_idx = torch.randint(features.shape[0], (1,)).to(torch.long)
+        random_feature = features[random_idx]
+        solver = HierarchicalCompressiveGMM(freq_mat, K, sketch, sigma2_bar, freq_epochs=1,
+                                            freq_batch_size=1024, lr=0.003, beta_1=0, beta_2=0.99,
+                                            gamma=0.98, step_size=1, initial_atom_mean=random_feature, project=True,
+                                            verbose=True)
         solver.fit_once()
-        _, centroids, _ = solver.get_gmm(return_numpy=False)
+        weights, centroids, _ = solver.get_gmm(return_numpy=False)
 
         with torch.no_grad():
             getattr(model.module.prototypes, "prototypes" + str(i_K)).weight.copy_(centroids)
 
         # log assignments
-        # print("features", features.shape)
-        # print("centroids", centroids.shape)
         distances = torch.cdist(features, centroids)
-        # print("distances", distances.shape)
         assignments_torch = torch.argmin(distances, dim=1).cpu()
-
-        # print("assignments_torch", assignments_torch.shape)
-        # print("assignments[i_K]", assignments[i_K].shape)
         assignments[i_K][local_memory_index] = assignments_torch
 
         # Misc
-        features_np = features.cpu().numpy()
-        centroids_np = centroids.cpu().numpy()
-        comp_learning_metrics = clustering_metrics(features_np, centroids_np)
-        logger.info("Compressive learning metrics: " + str(comp_learning_metrics))
+        results.add_result("SSE", sum_of_squarred_errors(features, centroids))
+        results.add_result("SE", sum_of_errors(features, centroids))
+        comp_learning_metrics = clustering_metrics(features, centroids)
+        results.update_results(comp_learning_metrics)
+        logger.info("Compressive learning metrics: " + str(results.results))
+        results_dir = Path(args.dump_path) / "results"
+        results_dir.mkdir(exist_ok=True, parents=True)
+        results.save(results_dir / "compressive_clustering_results.csv", "no output")
+
+        # Size of clusters
+        clusters, labels = compute_clusters_from_assignment(features, centroids)
+        size_clusters = []
+        for i, cluster in enumerate(clusters):
+            size_clusters.append(len(cluster))
+        plt.figure(figsize=(5, 5))
+        plt.title("Size clusters / weights")
+        plt.scatter(weights.cpu().numpy(), size_clusters, s=1, alpha=0.15)
+        plt.xlabel("Weights")
+        plt.ylabel("Size clusters")
+        save_dir = Path(args.dump_path) / "graphs"
+        save_dir.mkdir(exist_ok=True, parents=True)
+        plt.savefig(save_dir / f"{results.exp_id}.png")
 
         # Plot clustering
         figures_dir = Path(args.dump_path) / "figures"
         figures_dir.mkdir(exist_ok=True, parents=True)
-        proj_dim = np.random.choice(features_np.shape[1], 2, replace=False)
+        proj_dim = np.random.choice(features.shape[1], 2, replace=False)
         dim_1 = proj_dim[0]
         dim_2 = proj_dim[1]
         current_time = str(datetime.now().strftime("%d-%m-%Y %H-%M-%S"))
-        plot_cluster_assignments_and_histogram(current_time, features_np, centroids_np, figures_dir / current_time,
-                                               dim_1, dim_2)
+        plot_cluster_assignments_and_histogram(current_time + " " + str(results.exp_id), features, centroids,
+                                               figures_dir / current_time, dim_1, dim_2)
 
         # next memory bank to use
         j = (j + 1) % len(args.crops_for_assign)

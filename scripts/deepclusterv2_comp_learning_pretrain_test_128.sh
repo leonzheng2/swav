@@ -15,7 +15,7 @@
 #SBATCH --mem=450G
 
 DATASET_PATH="/datasets_local/ImageNet/train"
-EXPERIMENT_PATH="/root/local_storage/swav/deepclusterv2_comp_learning_pretrain_test"
+EXPERIMENT_PATH="/root/local_storage/swav/deepclusterv2_comp_learning_pretrain_test_128"
 mkdir -p $EXPERIMENT_PATH
 
 python -m torch.distributed.launch --nproc_per_node=1 main_deepclusterv2.py \
@@ -27,10 +27,10 @@ python -m torch.distributed.launch --nproc_per_node=1 main_deepclusterv2.py \
 --subset 260 \
 --crops_for_assign 0 1 \
 --temperature 0.1 \
---feat_dim 256 \
+--feat_dim 128 \
 --nmb_prototypes 1024 1024 1024 \
 --compressive_clustering \
---epochs 25 \
+--epochs 50 \
 --batch_size 32 \
 --base_lr 4.8 \
 --final_lr 0.0048 \

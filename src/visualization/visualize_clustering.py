@@ -60,19 +60,22 @@ def main(args):
 
 def plot_cluster_assignments_and_histogram(title, features, centroids, save_path, dim_1, dim_2):
     clusters, _ = compute_clusters_from_assignment(features, centroids)
+    features_np = features.cpu().numpy()
+    centroids_np = centroids.cpu().numpy()
     # for cluster in clusters:
     #     print(len(cluster))
 
     fig, axs = plt.subplots(1, 2, figsize=(10 * 2, 10))
     fig.suptitle(title)
-    axs[0].hist2d(features[:, dim_1], features[:, dim_2], bins=100)
-    axs[0].scatter(centroids[:, dim_1], centroids[:, dim_2], c='red', alpha=1)
+    axs[0].hist2d(features_np[:, dim_1], features_np[:, dim_2], bins=100)
+    axs[0].scatter(centroids_np[:, dim_1], centroids_np[:, dim_2], c='red', alpha=1)
     axs[0].set_xlabel(dim_1)
     axs[0].set_ylabel(dim_2)
     for cluster in clusters:
         # print(cluster)
-        axs[1].scatter(cluster[:, dim_1], cluster[:, dim_2], s=1, alpha=0.15)
-    axs[1].scatter(centroids[:, dim_1], centroids[:, dim_2], c='red', alpha=1)
+        cluster_np = cluster.cpu().numpy()
+        axs[1].scatter(cluster_np[:, dim_1], cluster_np[:, dim_2], s=1, alpha=0.15)
+    axs[1].scatter(centroids_np[:, dim_1], centroids_np[:, dim_2], c='red', alpha=1)
     axs[1].set_xlabel(dim_1)
     axs[1].set_ylabel(dim_2)
 
