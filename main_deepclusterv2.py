@@ -23,6 +23,15 @@ import torch.optim
 # from apex.parallel.LARC import LARC
 from scipy.sparse import csr_matrix
 
+from src.pycle_gpu.sketching.variance_estimation import estimate_sigma_adapted_radius
+from src.pycle_gpu.sketching.frequency_matrix import DenseFrequencyMatrix
+from src.pycle_gpu.cl_algo.simplified_algo import SimplifiedHierarchicalGmm
+from src.pycle_gpu.utils import clustering_metrics
+from src.visualization.visualize_clustering import plot_cluster_assignments_and_histogram
+from torch.utils.data import DataLoader, TensorDataset
+from datetime import datetime
+from pathlib import Path
+
 from src.utils import (
     bool_flag,
     initialize_exp,
@@ -67,6 +76,7 @@ parser.add_argument("--nmb_prototypes", default=[3000, 3000, 3000], type=int, na
                     help="number of prototypes - it can be multihead")
 parser.add_argument("--nmb_kmeans_iters", default=10, type=int,
                     help="number for K-means iterations. Choose 0 for just random centroids among data.")
+parser.add_argument("--compressive_clustering", action="store_true")
 
 #########################
 #### optim parameters ###
@@ -223,7 +233,8 @@ def main():
             lr_schedule,
             local_memory_index,
             local_memory_embeddings,
-            args.nmb_kmeans_iters
+            args.nmb_kmeans_iters,
+            args.compressive_clustering
         )
         training_stats.update(scores)
 
@@ -247,7 +258,8 @@ def main():
                     "local_memory_index": local_memory_index}, mb_path)
 
 
-def train(loader, model, optimizer, epoch, schedule, local_memory_index, local_memory_embeddings, nmb_kmeans_iters):
+def train(loader, model, optimizer, epoch, schedule, local_memory_index, local_memory_embeddings,
+          nmb_kmeans_iters, compressive_clustering):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -255,8 +267,13 @@ def train(loader, model, optimizer, epoch, schedule, local_memory_index, local_m
     cross_entropy = nn.CrossEntropyLoss(ignore_index=-100)
 
     since = time.time()
-    assignments = cluster_memory(model, local_memory_index, local_memory_embeddings,
-                                 len(loader.dataset), nmb_kmeans_iters)
+    if compressive_clustering:
+        logger.info('Doing compressive clustering...')
+        assignments = compressive_clustering_memory(model, local_memory_index, local_memory_embeddings, len(loader.dataset))
+    else:
+        logger.info('Doing spherical K-means clustering...')
+        assignments = cluster_memory(model, local_memory_index, local_memory_embeddings, len(loader.dataset),
+                                     nmb_kmeans_iters)
     logger.info('Clustering for epoch {} done in {} sec.'.format(epoch, time.time() - since))
 
     end = time.time()
@@ -352,6 +369,88 @@ def init_memory(dataloader, model):
     return local_memory_index, local_memory_embeddings
 
 
+def sampling_frequencies(dataset_tensor, nb_freq):
+    nb_samples, dim = dataset_tensor.shape
+    n0 = min(nb_samples, 5000)
+    # print("Estimation of sigma...")
+    sigma2_bar = estimate_sigma_adapted_radius(dataset_tensor, 500, n0, k_means=False, should_plot=False)
+    # print("End of sigma estimation")
+    sigma = sigma2_bar * np.eye(dim)
+    freq_matrix = DenseFrequencyMatrix(dim, nb_freq, torch.device("cuda"), dataset_tensor.dtype)
+    # print("Frequencies sampling...")
+    freq_matrix.sampling(sigma, k_means=False)
+    # print("End of frequency sampling")
+    return freq_matrix, sigma2_bar
+
+
+def compute_sketch(dataset, freq_matrix):
+    """ dataset is a torch tensor """
+    nb_samples = dataset.shape[0]
+    dataloader = DataLoader(TensorDataset(dataset), batch_size=64)
+    sketch = 0
+    for (batch, ) in dataloader:
+        tmp = batch.to(freq_matrix.device)
+        tmp = freq_matrix.transpose_apply(tmp)
+        tmp = torch.exp(-1j * tmp)
+        sketch += torch.sum(tmp, dim=0)
+    return sketch / nb_samples
+
+
+def compressive_clustering_memory(model, local_memory_index, local_memory_embeddings, size_dataset):
+    j = 0
+    assignments = -100 * torch.ones(len(args.nmb_prototypes), size_dataset).long()
+    for i_K, K in enumerate(args.nmb_prototypes):
+        # run compressive clustering, not distributed
+        features = local_memory_embeddings[j]
+        # print(torch.norm(features, dim=1)[:10])
+        dim = local_memory_embeddings.shape[-1]
+        nb_freq = 2 * K * dim
+        freq_mat, sigma2_bar = sampling_frequencies(features, nb_freq)
+        sketch = compute_sketch(features, freq_mat)
+
+        # TODO Put these parameters in the argument parser
+        solver = SimplifiedHierarchicalGmm(freq_mat, K, sketch, sigma2_bar, freq_epochs=1,
+                                           freq_batch_size=1024, lr=0.0003, beta_1=0, beta_2=0.99,
+                                           gamma=0.98, step_size=1, verbose=True)
+        solver.fit_once()
+        _, centroids, _ = solver.get_gmm(return_numpy=False)
+
+        with torch.no_grad():
+            getattr(model.module.prototypes, "prototypes" + str(i_K)).weight.copy_(centroids)
+
+        # log assignments
+        # print("features", features.shape)
+        # print("centroids", centroids.shape)
+        distances = torch.cdist(features, centroids)
+        # print("distances", distances.shape)
+        assignments_torch = torch.argmin(distances, dim=1).cpu()
+
+        # print("assignments_torch", assignments_torch.shape)
+        # print("assignments[i_K]", assignments[i_K].shape)
+        assignments[i_K][local_memory_index] = assignments_torch
+
+        # Misc
+        features_np = features.cpu().numpy()
+        centroids_np = centroids.cpu().numpy()
+        comp_learning_metrics = clustering_metrics(features_np, centroids_np)
+        logger.info("Compressive learning metrics: " + str(comp_learning_metrics))
+
+        # Plot clustering
+        figures_dir = Path(args.dump_path) / "figures"
+        figures_dir.mkdir(exist_ok=True, parents=True)
+        proj_dim = np.random.choice(features_np.shape[1], 2, replace=False)
+        dim_1 = proj_dim[0]
+        dim_2 = proj_dim[1]
+        current_time = str(datetime.now().strftime("%d-%m-%Y %H-%M-%S"))
+        plot_cluster_assignments_and_histogram(current_time, features_np, centroids_np, figures_dir / current_time,
+                                               dim_1, dim_2)
+
+        # next memory bank to use
+        j = (j + 1) % len(args.crops_for_assign)
+
+    return assignments
+
+
 def cluster_memory(model, local_memory_index, local_memory_embeddings, size_dataset, nmb_kmeans_iters):
     logger.info(f"Number of kmeans iterations: {nmb_kmeans_iters}")
     j = 0
@@ -416,7 +515,26 @@ def cluster_memory(model, local_memory_index, local_memory_embeddings, size_data
             indexes_all = torch.cat(indexes_all).cpu()
 
             # log assignments
+            # print("assignments_all", assignments_all.shape)
+            # print("indexes_all", indexes_all.shape)
+            # print("assignments[i_K]", assignments[i_K].shape)
             assignments[i_K][indexes_all] = assignments_all
+
+            # Misc
+            features_np = local_memory_embeddings[j].cpu().numpy()
+            centroids_np = centroids.cpu().numpy()
+            comp_learning_metrics = clustering_metrics(features_np, centroids_np)
+            logger.info("Compressive learning metrics: " + str(comp_learning_metrics))
+
+            # Plot clustering
+            figures_dir = Path(args.dump_path) / "figures-spherical-kmeans"
+            figures_dir.mkdir(exist_ok=True, parents=True)
+            proj_dim = np.random.choice(features_np.shape[1], 2, replace=False)
+            dim_1 = proj_dim[0]
+            dim_2 = proj_dim[1]
+            current_time = str(datetime.now().strftime("%d-%m-%Y %H-%M-%S"))
+            plot_cluster_assignments_and_histogram(current_time, features_np, centroids_np, figures_dir / current_time,
+                                                   dim_1, dim_2)
 
             # next memory bank to use
             j = (j + 1) % len(args.crops_for_assign)
