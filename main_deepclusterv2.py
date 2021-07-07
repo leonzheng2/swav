@@ -79,7 +79,9 @@ parser.add_argument("--nmb_prototypes", default=[3000, 3000, 3000], type=int, na
                     help="number of prototypes - it can be multihead")
 parser.add_argument("--nmb_kmeans_iters", default=10, type=int,
                     help="number for K-means iterations. Choose 0 for just random centroids among data.")
-parser.add_argument("--compressive_clustering", action="store_true")
+parser.add_argument("--cl_epochs_start", type=int, default=0)
+parser.add_argument("--cl_epochs_end", type=int, default=0)
+
 
 #########################
 #### optim parameters ###
@@ -219,6 +221,7 @@ def main():
         local_memory_index, local_memory_embeddings = init_memory(train_loader, model)
 
     cudnn.benchmark = True
+    comp_clustering_epochs_set = set(range(args.cl_epochs_start, args.cl_epochs_end))
     for epoch in range(start_epoch, args.epochs):
 
         # train the network for one epoch
@@ -237,7 +240,7 @@ def main():
             local_memory_index,
             local_memory_embeddings,
             args.nmb_kmeans_iters,
-            args.compressive_clustering
+            compressive_clustering=epoch in comp_clustering_epochs_set
         )
         training_stats.update(scores)
 

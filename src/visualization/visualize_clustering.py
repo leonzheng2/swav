@@ -75,11 +75,12 @@ def plot_cluster_assignments_and_histogram(title, features, centroids, save_path
         # print(cluster)
         cluster_np = cluster.cpu().numpy()
         axs[1].scatter(cluster_np[:, dim_1], cluster_np[:, dim_2], s=1, alpha=0.15)
-    axs[1].scatter(centroids_np[:, dim_1], centroids_np[:, dim_2], c='red', alpha=1)
+    axs[1].scatter(centroids_np[:, dim_1], centroids_np[:, dim_2], c='red', s=10, alpha=1)
     axs[1].set_xlabel(dim_1)
     axs[1].set_ylabel(dim_2)
 
     plt.savefig(save_path)
+    plt.close(fig)
 
 
 def plot_cluster_histogram(title, features, centroids, save_path, dim_1, dim_2):
@@ -91,6 +92,7 @@ def plot_cluster_histogram(title, features, centroids, save_path, dim_1, dim_2):
     plt.xlabel(dim_1)
     plt.ylabel(dim_2)
     plt.savefig(save_path)
+    plt.close()
 
 
 def plot_cluster_scatter(title, features, centroids, save_path, dim_1=0, dim_2=1):
@@ -111,6 +113,7 @@ def plot_cluster_scatter(title, features, centroids, save_path, dim_1=0, dim_2=1
     plt.scatter(centroids[:, dim_1], centroids[:, dim_2])
     # plt.legend(["Data", "Centroids"])
     plt.savefig(save_path)
+    plt.close()
 
 if __name__ == '__main__':
     args = get_parser().parse_args()
