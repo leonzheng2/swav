@@ -31,7 +31,7 @@ python -m torch.distributed.launch --nproc_per_node=1 main_deepclusterv2.py \
 --size_crops 160 96 \
 --min_scale_crops 0.08 0.05 \
 --max_scale_crops 1. 0.14 \
---subset 260 \
+--subset 1204 \
 --ratio_minority_class 0.8 \
 --ratio_step_size 50 \
 --crops_for_assign 0 1 \

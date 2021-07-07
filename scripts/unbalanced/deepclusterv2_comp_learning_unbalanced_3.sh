@@ -14,7 +14,7 @@
 #SBATCH --time=25:00:00
 #SBATCH --mem=450G
 
-EXPERIMENT_PATH="/root/local_storage/swav/deepclusterv2_random_data_unbalanced_2"
+EXPERIMENT_PATH="/root/local_storage/swav/deepclusterv2_comp_learning_unbalanced_3"
 IMAGENET="/datasets_local/ImageNet"
 IMAGENET_TRAIN="${IMAGENET}/train"
 
@@ -31,14 +31,15 @@ python -m torch.distributed.launch --nproc_per_node=1 main_deepclusterv2.py \
 --size_crops 160 96 \
 --min_scale_crops 0.08 0.05 \
 --max_scale_crops 1. 0.14 \
---subset 1204 \
---ratio_minority_class 0.8 \
---ratio_step_size 50 \
+--subset 2385 \
+--ratio_minority_class 0.9 \
+--ratio_step_size 100 \
 --crops_for_assign 0 1 \
 --temperature 0.1 \
 --feat_dim 128 \
 --nmb_prototypes 1024 1024 1024 \
---nmb_kmeans_iters 0 \
+--cl_epochs_start 0 \
+--cl_epochs_end 50 \
 --epochs 50 \
 --batch_size 32 \
 --base_lr 4.8 \
