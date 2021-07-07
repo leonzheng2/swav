@@ -57,6 +57,8 @@ parser.add_argument("--data_path", type=str, default="/path/to/imagenet",
                     help="path to dataset repository")
 parser.add_argument("--subset", type=int, default=-1,
                     help="take a fix number of images per class (example 260)")
+parser.add_argument("--ratio_minority_class", type=float, default=0.)
+parser.add_argument("--ratio_step_size", type=float, default=1.)
 parser.add_argument("--nmb_crops", type=int, default=[2], nargs="+",
                     help="list of number of crops (example: [2, 6])")
 parser.add_argument("--size_crops", type=int, default=[224], nargs="+",
@@ -145,8 +147,12 @@ def main():
         args.min_scale_crops,
         args.max_scale_crops,
         return_index=True,
-        subset=args.subset
+        subset=args.subset,
+        ratio_minority_class=args.ratio_minority_class,
+        ratio_step_size=args.ratio_step_size,
+        random_seed=args.seed
     )
+
     sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(
         train_dataset,

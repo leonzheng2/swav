@@ -34,7 +34,10 @@ class MultiCropDataset(datasets.ImageFolder):
         max_scale_crops,
         size_dataset=-1,
         return_index=False,
-        subset=-1
+        subset=-1,
+        ratio_minority_class=0.,
+        ratio_step_size=1.,
+        random_seed=0
     ):
         super(MultiCropDataset, self).__init__(data_path)
 
@@ -42,9 +45,17 @@ class MultiCropDataset(datasets.ImageFolder):
         if subset > 0:
             all_indices = []
             label2inds = build_label_index(self.targets)
-            for img_indices in label2inds.values():
+            # Unbalanced dataset
+            np.random.seed(random_seed)
+            number_minority_class = int(ratio_minority_class * len(label2inds))
+            minority_class_idx = set(np.random.choice(len(label2inds), number_minority_class, replace=False))
+            for label, img_indices in label2inds.items():
                 assert len(img_indices) >= subset
-                all_indices += img_indices[:subset]
+                if label in minority_class_idx:
+                    minority_subset = int(subset / ratio_step_size)
+                    all_indices += img_indices[:minority_subset]
+                else:
+                    all_indices += img_indices[:subset]
             self.imgs = [self.imgs[idx] for idx in all_indices]
             self.samples = [self.samples[idx] for idx in all_indices]
             self.targets = [self.targets[idx] for idx in all_indices]
