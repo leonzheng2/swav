@@ -129,6 +129,7 @@ parser.add_argument("--syncbn_process_group_size", type=int, default=8, help="""
                     https://github.com/NVIDIA/apex/blob/master/apex/parallel/__init__.py#L58-L67""")
 parser.add_argument("--dump_path", type=str, default=".",
                     help="experiment dump path for checkpoints and log")
+parser.add_argument("--save_all_embeddings", action="store_true")
 parser.add_argument("--seed", type=int, default=31, help="seed")
 
 
@@ -268,6 +269,10 @@ def main():
                 )
         torch.save({"local_memory_embeddings": local_memory_embeddings,
                     "local_memory_index": local_memory_index}, mb_path)
+        if args.save_all_embeddings:
+            path = Path(args.dump_path) / "local_embeddings" / f"mb{epoch}.pth"
+            torch.save({"local_memory_embeddings": local_memory_embeddings,
+                        "local_memory_index": local_memory_index}, path)
 
 
 def train(loader, model, optimizer, epoch, schedule, local_memory_index, local_memory_embeddings,
