@@ -19,8 +19,11 @@ IMAGENET="/datasets_local/ImageNet"
 IMAGENET_TRAIN="${IMAGENET}/train"
 
 PRETRAIN_EXPERIMENT_PATH="${EXPERIMENT_PATH}/pretrain"
+PRETRAINED="${PRETRAIN_EXPERIMENT_PATH}/checkpoint.pth.tar"
+LINEAR_EVAL_EXPERIMENT_PATH="${EXPERIMENT_PATH}/linear_eval"
 
 mkdir -p $PRETRAIN_EXPERIMENT_PATH
+mkdir -p $LINEAR_EVAL_EXPERIMENT_PATH
 
 python -m torch.distributed.launch --nproc_per_node=1 main_deepclusterv2.py \
 --data_path $IMAGENET_TRAIN \
@@ -46,3 +49,11 @@ python -m torch.distributed.launch --nproc_per_node=1 main_deepclusterv2.py \
 --dump_path $PRETRAIN_EXPERIMENT_PATH \
 --workers 8 \
 --save_all_embeddings \
+
+python -m torch.distributed.launch --nproc_per_node=1 eval_linear.py \
+--data_path $IMAGENET \
+--pretrained $PRETRAINED \
+--dump_path $LINEAR_EVAL_EXPERIMENT_PATH \
+--arch resnet18 \
+--workers 8 \
+--epochs 10
