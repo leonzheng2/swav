@@ -32,6 +32,9 @@ class HierarchicalCompressiveGMM:
         self.step_size = step_size
         self.l2_penalty = l2_penalty
 
+        # Check params
+        # print(vars(self))
+
         # Misc
         self.device = freq_matrix.device
         self.real_dtype = freq_matrix.dtype
