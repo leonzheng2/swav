@@ -81,9 +81,20 @@ parser.add_argument("--nmb_prototypes", default=[3000, 3000, 3000], type=int, na
                     help="number of prototypes - it can be multihead")
 parser.add_argument("--nmb_kmeans_iters", default=10, type=int,
                     help="number for K-means iterations. Choose 0 for just random centroids among data.")
+
+#########################################
+## compressive learning specific params #
+#########################################
 parser.add_argument("--cl_epochs_start", type=int, default=0)
 parser.add_argument("--cl_epochs_end", type=int, default=0)
-
+parser.add_argument("--cl_freq_batch_size", type=int, default=1)
+parser.add_argument("--cl_lr", type=float, default=0.003)
+parser.add_argument("--cl_beta_1", type=float, default=0.)
+parser.add_argument("--cl_beta_2", type=float, default=0.99)
+parser.add_argument("--cl_gamma", type=float, default=0.98)
+parser.add_argument("--cl_step_size", type=int, default=1)
+parser.add_argument("--cl_project", action="store_true")
+parser.add_argument("--cl_l2_penalty", type=float, default=0)
 
 #########################
 #### optim parameters ###
@@ -431,13 +442,14 @@ def compressive_clustering_memory(model, local_memory_index, local_memory_embedd
         freq_mat, sigma2_bar = sampling_frequencies(features, nb_freq)
         sketch = compute_sketch(features, freq_mat)
 
-        # TODO Put these parameters in the argument parser
         random_idx = torch.randint(features.shape[0], (1,)).to(torch.long)
         random_feature = features[random_idx]
-        solver = HierarchicalCompressiveGMM(freq_mat, K, sketch, sigma2_bar, freq_epochs=1,
-                                            freq_batch_size=1024, lr=0.003, beta_1=0, beta_2=0.99,
-                                            gamma=0.98, step_size=1, initial_atom_mean=random_feature, project=True,
-                                            verbose=True)
+        solver = HierarchicalCompressiveGMM(freq_mat, K, sketch, sigma2_bar, freq_epochs=args.cl_freq_epochs,
+                                            freq_batch_size=args.cl_freq_batch_size, lr=args.cl_lr,
+                                            beta_1=args.cl_beta_1, beta_2=args.cl_beta_2,
+                                            gamma=args.cl_gamma, step_size=args.cl_step_size,
+                                            initial_atom_mean=random_feature, project=args.cl_project,
+                                            l2_penalty=args.cl_l2_penalty, verbose=True)
         solver.fit_once()
         weights, centroids, _ = solver.get_gmm(return_numpy=False)
 

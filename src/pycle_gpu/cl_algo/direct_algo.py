@@ -12,7 +12,7 @@ from src.pycle_gpu.sketching.frequency_matrix import DenseFrequencyMatrix
 class HierarchicalCompressiveGMM:
 
     def __init__(self, freq_matrix, nb_mixtures, sketch, sigma2_bar, freq_epochs, freq_batch_size, lr, beta_1, beta_2,
-                 gamma, step_size, initial_atom_mean, project, verbose):
+                 gamma, step_size, initial_atom_mean, project, l2_penalty, verbose):
         assert isinstance(freq_matrix, DenseFrequencyMatrix)
         self.freq_matrix = freq_matrix
         self.nb_mixtures = nb_mixtures
@@ -30,6 +30,7 @@ class HierarchicalCompressiveGMM:
         self.beta_2 = beta_2
         self.gamma = gamma
         self.step_size = step_size
+        self.l2_penalty = l2_penalty
 
         # Misc
         self.device = freq_matrix.device
@@ -145,6 +146,11 @@ class HierarchicalCompressiveGMM:
                 reduced_sketch_of_sol = self.sketch_of_solution(torch.exp(log_alphas), all_mus,
                                                                 torch.exp(all_log_sigmas), reduced_freq_mat)
                 loss = torch.square(torch.linalg.norm(sketch_batch - reduced_sketch_of_sol))
+                # print("Loss without penalty:", loss)
+                if self.l2_penalty > 0:
+                    mean_norms = torch.mean(torch.square(torch.linalg.norm(all_mus, dim=1)))
+                    # print("Penalty: ", mean_norms)
+                    loss += self.l2_penalty * mean_norms
                 loss.backward()
                 optimizer.step()
                 # Projection step
@@ -192,7 +198,6 @@ class HierarchicalCompressiveGMM:
         :return:
         """
         weights = self.alphas
-        sigmas_mat = torch.diag_embed(self.all_sigmas)
         if return_numpy:
-            return weights.cpu().detach().numpy(), self.all_mus.cpu().detach().numpy(), sigmas_mat.cpu().detach().numpy()
-        return weights, self.all_mus, sigmas_mat
+            return weights.cpu().detach().numpy(), self.all_mus.cpu().detach().numpy(), self.all_sigmas.cpu().detach().numpy()
+        return weights, self.all_mus, self.all_sigmas
