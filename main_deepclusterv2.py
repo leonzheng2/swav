@@ -87,10 +87,11 @@ parser.add_argument("--nmb_kmeans_iters", default=10, type=int,
 #########################################
 parser.add_argument("--cl_epochs_start", type=int, default=0)
 parser.add_argument("--cl_epochs_end", type=int, default=0)
-parser.add_argument("--cl_freq_batch_size", type=int, default=1)
+parser.add_argument("--cl_freq_epochs", type=int, default=1)
+parser.add_argument("--cl_freq_batch_size", type=int, default=1024)
 parser.add_argument("--cl_lr", type=float, default=0.003)
 parser.add_argument("--cl_beta_1", type=float, default=0.)
-parser.add_argument("--cl_beta_2", type=float, default=0.99)
+parser.add_argument("--cl_beta_2", type=float, default=0.9)
 parser.add_argument("--cl_gamma", type=float, default=0.98)
 parser.add_argument("--cl_step_size", type=int, default=1)
 parser.add_argument("--cl_project", action="store_true")
@@ -244,7 +245,20 @@ def main():
         local_memory_index, local_memory_embeddings = init_memory(train_loader, model)
 
     cudnn.benchmark = True
+
+    # Compressive clustering setting
     comp_clustering_epochs_set = set(range(args.cl_epochs_start, args.cl_epochs_end))
+    cl_args = {
+        "freq_epochs": args.cl_freq_epochs,
+        "freq_batch_size": args.cl_freq_batch_size,
+        "lr": args.cl_lr,
+        "beta_1": args.cl_beta_1,
+        "beta_2": args.cl_beta_2,
+        "gamma": args.cl_gamma,
+        "step_size": args.cl_step_size,
+        "project": args.cl_project,
+        "l2_penalty": args.cl_l2_penalty
+    }
     for epoch in range(start_epoch, args.epochs):
 
         # train the network for one epoch
@@ -263,7 +277,7 @@ def main():
             local_memory_index,
             local_memory_embeddings,
             args.nmb_kmeans_iters,
-            compressive_clustering=epoch in comp_clustering_epochs_set
+            cl_args=cl_args if epoch in comp_clustering_epochs_set else {}
         )
         training_stats.update(scores)
 
@@ -293,7 +307,7 @@ def main():
 
 
 def train(loader, model, optimizer, epoch, schedule, local_memory_index, local_memory_embeddings,
-          nmb_kmeans_iters, compressive_clustering):
+          nmb_kmeans_iters, cl_args):
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -301,9 +315,10 @@ def train(loader, model, optimizer, epoch, schedule, local_memory_index, local_m
     cross_entropy = nn.CrossEntropyLoss(ignore_index=-100)
 
     since = time.time()
-    if compressive_clustering:
+    if cl_args:
         logger.info('Doing compressive clustering...')
-        assignments = compressive_clustering_memory(model, local_memory_index, local_memory_embeddings, len(loader.dataset))
+        assignments = compressive_clustering_memory(model, local_memory_index, local_memory_embeddings,
+                                                    len(loader.dataset), cl_args)
     else:
         logger.info('Doing spherical K-means clustering...')
         assignments = cluster_memory(model, local_memory_index, local_memory_embeddings, len(loader.dataset),
@@ -430,7 +445,7 @@ def compute_sketch(dataset, freq_matrix):
     return sketch / nb_samples
 
 
-def compressive_clustering_memory(model, local_memory_index, local_memory_embeddings, size_dataset):
+def compressive_clustering_memory(model, local_memory_index, local_memory_embeddings, size_dataset, cl_args):
     j = 0
     assignments = -100 * torch.ones(len(args.nmb_prototypes), size_dataset).long()
     for i_K, K in enumerate(args.nmb_prototypes):
@@ -444,12 +459,8 @@ def compressive_clustering_memory(model, local_memory_index, local_memory_embedd
 
         random_idx = torch.randint(features.shape[0], (1,)).to(torch.long)
         random_feature = features[random_idx]
-        solver = HierarchicalCompressiveGMM(freq_mat, K, sketch, sigma2_bar, freq_epochs=args.cl_freq_epochs,
-                                            freq_batch_size=args.cl_freq_batch_size, lr=args.cl_lr,
-                                            beta_1=args.cl_beta_1, beta_2=args.cl_beta_2,
-                                            gamma=args.cl_gamma, step_size=args.cl_step_size,
-                                            initial_atom_mean=random_feature, project=args.cl_project,
-                                            l2_penalty=args.cl_l2_penalty, verbose=True)
+        solver = HierarchicalCompressiveGMM(freq_mat, K, sketch, sigma2_bar, **cl_args,
+                                            initial_atom_mean=random_feature, verbose=True)
         solver.fit_once()
         weights, centroids, _ = solver.get_gmm(return_numpy=False)
 
@@ -462,8 +473,8 @@ def compressive_clustering_memory(model, local_memory_index, local_memory_embedd
         assignments[i_K][local_memory_index] = assignments_torch
 
         # Misc
-        results.add_result("SSE", sum_of_squarred_errors(features, centroids))
-        results.add_result("SE", sum_of_errors(features, centroids))
+        results.add_result("SSE", sum_of_squarred_errors(features, centroids).item())
+        results.add_result("SE", sum_of_errors(features, centroids).item())
         comp_learning_metrics = clustering_metrics(features, centroids)
         results.update_results(comp_learning_metrics)
         logger.info("Compressive learning metrics: " + str(results.results))
