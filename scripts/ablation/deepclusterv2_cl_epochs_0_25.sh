@@ -49,6 +49,7 @@ python -m torch.distributed.launch --nproc_per_node=1 main_deepclusterv2.py \
 --arch resnet18 \
 --dump_path $PRETRAIN_EXPERIMENT_PATH \
 --workers 8 \
+--save_all_embeddings \
 
 python -m torch.distributed.launch --nproc_per_node=1 eval_linear.py \
 --data_path $IMAGENET \
