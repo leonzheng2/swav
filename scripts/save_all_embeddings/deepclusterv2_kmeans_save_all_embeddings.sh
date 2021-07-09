@@ -14,7 +14,7 @@
 #SBATCH --time=25:00:00
 #SBATCH --mem=450G
 
-EXPERIMENT_PATH="/root/local_storage/swav/deepclusterv2_kmeans_save_all_embeddings"
+EXPERIMENT_PATH="/root/local_storage/swav/deepclusterv2_kmeans_save_all_embeddings_bis"
 IMAGENET="/datasets_local/ImageNet"
 IMAGENET_TRAIN="${IMAGENET}/train"
 
