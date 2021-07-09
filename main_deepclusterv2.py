@@ -218,6 +218,11 @@ def main():
     )
     start_epoch = to_restore["epoch"]
 
+    # build save for embeddings
+    if args.save_all_embeddings:
+        all_embeddings_dir = Path(args.dump_path) / "local_embeddings"
+        all_embeddings_dir.mkdir(parents=True, exist_ok=True)
+
     # build the memory bank
     mb_path = os.path.join(args.dump_path, "mb" + str(args.rank) + ".pth")
     if os.path.isfile(mb_path):
@@ -269,8 +274,9 @@ def main():
                 )
         torch.save({"local_memory_embeddings": local_memory_embeddings,
                     "local_memory_index": local_memory_index}, mb_path)
+
         if args.save_all_embeddings:
-            path = Path(args.dump_path) / "local_embeddings" / f"mb{epoch}.pth"
+            path = all_embeddings_dir / f"mb{epoch}.pth"
             torch.save({"local_memory_embeddings": local_memory_embeddings,
                         "local_memory_index": local_memory_index}, path)
 
